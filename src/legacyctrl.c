@@ -3,6 +3,7 @@
 #include "leddrv.h"
 #include "debug.h"
 #include "legacyctrl.h"
+#include "ngctrl.h"
 
 int legacy_ble_rx(uint8_t *val, uint16_t len)
 {
@@ -83,8 +84,10 @@ int legacy_usb_rx(uint8_t *buf, uint16_t len)
 				buf[4], buf[5], buf[6], buf[7]);
 
 	if (rx_len == 0) {
-		if (memcmp(buf, "wang", 5))
-			return -1;
+		if (memcmp(buf, "wang", 5)) {
+			ng_parse(buf, len);
+			return 0;
+		}
 
 		int init_len = len > LEGACY_HEADER_SIZE ? len : sizeof(data_legacy_t);
 		init_len += MAX_PACKET_SIZE;

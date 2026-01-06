@@ -51,6 +51,8 @@ static tmosTaskID common_taskid = INVALID_TASK_ID ;
 
 volatile uint16_t fb[LED_COLS] = {0};
 volatile int mode, is_play_sequentially = 1;
+int streaming_enabled;
+
 
 __HIGH_CODE
 static void change_brightness()
@@ -255,11 +257,14 @@ static void spawn_tasks()
 {
 	common_taskid = TMOS_ProcessEventRegister(common_tasks);
 
-	tmos_start_reload_task(common_taskid, ANI_MARQUE, ANI_MARQUE_SPEED_T / 625);
-	tmos_start_reload_task(common_taskid, ANI_FLASH, ANI_FLASH_SPEED_T / 625);
 	tmos_start_reload_task(common_taskid, SCAN_BOOTLD_BTN,
 				SCAN_BOOTLD_BTN_SPEED_T / 625);
-	tmos_start_task(common_taskid, ANI_NEXT_STEP, 500000 / 625);
+
+	if (!streaming_enabled) {
+		tmos_start_reload_task(common_taskid, ANI_MARQUE, ANI_MARQUE_SPEED_T / 625);
+		tmos_start_reload_task(common_taskid, ANI_FLASH, ANI_FLASH_SPEED_T / 625);
+		tmos_start_task(common_taskid, ANI_NEXT_STEP, 500000 / 625);
+	}
 }
 
 static void start_ble_animation()
@@ -282,10 +287,10 @@ static void start_normal_animation()
 
 static void resume_from_streaming()
 {
-	if (badge_cfg.ble_always_on) {
-		start_normal_animation();
-	} else {
+	if (mode == DOWNLOAD) {
 		start_ble_animation();
+	} else {
+		start_normal_animation();
 	}
 }
 
@@ -298,10 +303,11 @@ static void stop_all_animation()
 	memset(fb, 0, sizeof(fb));
 }
 
-int streaming_enabled;
+static uint16_t stream_offset = 0;
 
 uint8_t streaming_setting(uint8_t *params, uint16_t len)
 {
+	stream_offset = 0;
 	if (params[0] == 0x00) { // enter streaming mode
 		stop_all_animation();
 		streaming_enabled = 1;
@@ -318,7 +324,12 @@ uint8_t stream_bitmap(uint8_t *params, uint16_t len)
 		return -1;
 	}
 
-	tmos_memcpy(fb, params, min(LED_COLS * 2, len));
+	uint16_t copy_len = min(LED_COLS * 2 - stream_offset, len);
+	tmos_memcpy((uint8_t *)fb + stream_offset, params, copy_len);
+	stream_offset += copy_len;
+	if (stream_offset >= LED_COLS * 2)
+		stream_offset = 0;
+
 	return 0;
 }
 
@@ -367,6 +378,11 @@ static void disp_charging()
 {
 	int blink = 0;
 	while (mode == BOOT) {
+		if (streaming_enabled) {
+			memset((void *)fb, 0, sizeof(fb));
+			return;
+		}
+
 		int percent = batt_raw2percent(batt_raw());
 
 		if (charging_status()) {
